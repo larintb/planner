@@ -5,9 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Planificador de Tareas Retro con Supabase</title>
     
-    <!-- ======================================================= -->
-    <!--      CONFIGURACIÓN DE SUPABASE (TUS CLAVES VAN AQUÍ)    -->
-    <!-- ======================================================= -->
     <script>
         // Este bloque simula un archivo .env.
         // Pega aquí tu URL y tu clave anónima de Supabase.
@@ -17,18 +14,14 @@
         };
     </script>
     
-    <!-- Tailwind CSS for utility classes -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Google Fonts: VT323 for the pixel look -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
     
-    <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     
-    <!-- Supabase Client Library -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <style>
@@ -172,13 +165,11 @@
 
     <div id="app-container" class="hidden w-full max-w-lg mx-auto p-6">
         
-        <!-- Header -->
         <header class="text-center mb-6">
             <h1 class="text-5xl mb-2">Mi Planificador</h1>
             <p style="color: #ab856f;">¡Un día productivo te espera!</p>
         </header>
 
-        <!-- Add Task Form -->
         <form id="add-task-form" class="flex items-center gap-3 mb-6">
             <input type="text" id="task-input" placeholder="Nueva tarea..." class="flex-grow w-full" required>
             <button type="submit" class="retro-btn">
@@ -186,16 +177,12 @@
             </button>
         </form>
 
-        <!-- Task List -->
         <div id="task-list" class="space-y-3">
-            <!-- Tasks will be injected here by JavaScript -->
-        </div>
+            </div>
 
-        <!-- User ID Display -->
         <div id="user-info" class="text-center mt-6 text-xs" style="color: #7d6a5a;"></div>
     </div>
 
-    <!-- Supabase Logic -->
     <script>
         // --- Supabase Initialization ---
         const { createClient } = supabase;
@@ -210,46 +197,46 @@
         const userInfo = document.getElementById('user-info');
         
         let currentUser = null;
+        let localTasks = []; // Local cache for tasks
 
         // --- Authentication ---
         async function authenticateUser() {
-            const { data: { session }, error } = await _supabase.auth.getSession();
+            const { data: { session } } = await _supabase.auth.getSession();
             
             if (session) {
                 currentUser = session.user;
-                console.log("Existing session found for user:", currentUser.id);
             } else {
-                 const { data, error: signInError } = await _supabase.auth.signInAnonymously();
-                 if(signInError) {
-                     console.error("Error signing in anonymously:", signInError);
-                     loadingSpinner.textContent = 'Falló la autenticación. Por favor, inténtalo de nuevo.';
+                 const { data, error } = await _supabase.auth.signInAnonymously();
+                 if(error) {
+                     console.error("Error signing in anonymously:", error);
+                     loadingSpinner.textContent = 'Falló la autenticación. Revisa la consola (F12).';
                      return;
                  }
                  currentUser = data.user;
-                 console.log("New anonymous user created:", currentUser.id);
             }
             
             if (currentUser) {
                 userInfo.textContent = `ID de Usuario: ${currentUser.id}`;
                 appContainer.classList.remove('hidden');
                 loadingSpinner.classList.add('hidden');
-                await listenForTasks();
+                await fetchInitialTasks();
+                listenForChanges();
             }
         }
 
         // --- Render Tasks to the DOM ---
-        function renderTasks(tasks) {
+        function renderTasks() {
             // Sort tasks: incomplete first, then by creation time
-            tasks.sort((a, b) => {
+            localTasks.sort((a, b) => {
                 if (a.completed !== b.completed) return a.completed ? 1 : -1;
                 return new Date(b.created_at) - new Date(a.created_at);
             });
 
             taskList.innerHTML = ''; // Clear the list
-            if (tasks.length === 0) {
+            if (localTasks.length === 0) {
                 taskList.innerHTML = `<p class="text-center text-lg" style="color: #ab856f;">Aún no hay tareas. ¡Añade una!</p>`;
             } else {
-                tasks.forEach(task => {
+                localTasks.forEach(task => {
                     const taskElement = document.createElement('div');
                     taskElement.className = 'task-item';
                     taskElement.dataset.id = task.id;
@@ -271,21 +258,40 @@
             }
         }
 
-        // --- Supabase Real-time Listener ---
-        async function listenForTasks() {
-            // Initial fetch
+        // --- Supabase Data Functions ---
+        
+        // Fetch all tasks once on initial load
+        async function fetchInitialTasks() {
             const { data, error } = await _supabase.from('tasks').select('*');
-            if (error) console.error('Error fetching tasks:', error);
-            else renderTasks(data);
-
-            // Listen for changes
+            if (error) {
+                console.error('Error fetching tasks:', error);
+            } else {
+                localTasks = data;
+                renderTasks();
+            }
+        }
+        
+        // Listen for real-time changes
+        function listenForChanges() {
             _supabase.channel('public:tasks')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, async (payload) => {
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
                     console.log('Change received!', payload);
-                    // Refetch all tasks to update UI
-                    const { data, error } = await _supabase.from('tasks').select('*');
-                    if (error) console.error('Error fetching tasks after change:', error);
-                    else renderTasks(data);
+                    
+                    switch(payload.eventType) {
+                        case 'INSERT':
+                            localTasks.push(payload.new);
+                            break;
+                        case 'UPDATE':
+                            const indexToUpdate = localTasks.findIndex(t => t.id === payload.new.id);
+                            if (indexToUpdate > -1) {
+                                localTasks[indexToUpdate] = payload.new;
+                            }
+                            break;
+                        case 'DELETE':
+                            localTasks = localTasks.filter(t => t.id !== payload.old.id);
+                            break;
+                    }
+                    renderTasks();
                 })
                 .subscribe();
         }
@@ -295,14 +301,25 @@
             e.preventDefault();
             const taskText = taskInput.value.trim();
             if (taskText && currentUser) {
+                // Temporarily disable the form to prevent double submission
+                taskInput.disabled = true;
+                const submitButton = addTaskForm.querySelector('button');
+                submitButton.disabled = true;
+
                 const { error } = await _supabase.from('tasks').insert({ 
                     text: taskText, 
                     user_id: currentUser.id 
                 });
+
+                // Re-enable the form
+                taskInput.disabled = false;
+                submitButton.disabled = false;
+                
                 if (error) {
                     console.error("Error adding task: ", error);
                 } else {
                     taskInput.value = ''; // Clear input field
+                    taskInput.focus();
                 }
             }
         });
