@@ -3,7 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Planificador de Tareas Retro</title>
+    <title>Planificador de Tareas Retro con Supabase</title>
+    
+    <!-- ======================================================= -->
+    <!--      CONFIGURACIÓN DE SUPABASE (TUS CLAVES VAN AQUÍ)    -->
+    <!-- ======================================================= -->
+    <script>
+        // Este bloque simula un archivo .env.
+        // Pega aquí tu URL y tu clave anónima de Supabase.
+        const SUPABASE_CONFIG = {
+            URL: 'https://eysgmubmkxjxaskxbvum.supabase.co',
+            ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV5c2dtdWJta3hqeGFza3hidnVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA3NDYwNTMsImV4cCI6MjA2NjMyMjA1M30.I3p0aZ9iZ-VaXRR8dDmAnxdXPEIkUbkoji95oGopzuM'
+        };
+    </script>
     
     <!-- Tailwind CSS for utility classes -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -15,6 +27,9 @@
     
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <!-- Supabase Client Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <style>
         /* Custom styles for the Stardew Valley retro aesthetic */
@@ -180,25 +195,11 @@
         <div id="user-info" class="text-center mt-6 text-xs" style="color: #7d6a5a;"></div>
     </div>
 
-    <!-- Firebase -->
-    <script type="module">
-        // Import Firebase modules
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot, collection, addDoc, deleteDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // --- Firebase Configuration ---
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'retro-planner-app';
-
-        // --- Initialize Firebase ---
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-
-        let userId = null;
-        let tasksCollectionRef = null;
-        let unsubscribeTasks = null; // To detach the listener later
+    <!-- Supabase Logic -->
+    <script>
+        // --- Supabase Initialization ---
+        const { createClient } = supabase;
+        const _supabase = createClient(SUPABASE_CONFIG.URL, SUPABASE_CONFIG.ANON_KEY);
 
         // --- DOM Elements ---
         const appContainer = document.getElementById('app-container');
@@ -207,65 +208,44 @@
         const taskInput = document.getElementById('task-input');
         const taskList = document.getElementById('task-list');
         const userInfo = document.getElementById('user-info');
+        
+        let currentUser = null;
 
         // --- Authentication ---
-        onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                userId = user.uid;
-                console.log("User is signed in with UID:", userId);
-                userInfo.textContent = `ID de Usuario: ${userId}`;
-                
-                // Set up Firestore collection reference now that we have a user ID
-                tasksCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/tasks`);
-                
-                // Start listening for task updates
-                listenForTasks();
-
-                // Show the app and hide the loader
+        async function authenticateUser() {
+            const { data: { session }, error } = await _supabase.auth.getSession();
+            
+            if (session) {
+                currentUser = session.user;
+                console.log("Existing session found for user:", currentUser.id);
+            } else {
+                 const { data, error: signInError } = await _supabase.auth.signInAnonymously();
+                 if(signInError) {
+                     console.error("Error signing in anonymously:", signInError);
+                     loadingSpinner.textContent = 'Falló la autenticación. Por favor, inténtalo de nuevo.';
+                     return;
+                 }
+                 currentUser = data.user;
+                 console.log("New anonymous user created:", currentUser.id);
+            }
+            
+            if (currentUser) {
+                userInfo.textContent = `ID de Usuario: ${currentUser.id}`;
                 appContainer.classList.remove('hidden');
                 loadingSpinner.classList.add('hidden');
-            } else {
-                console.log("No user is signed in.");
-                appContainer.classList.add('hidden');
-                loadingSpinner.textContent = 'No se pudo autenticar. Por favor, refresca la página.';
-                loadingSpinner.classList.remove('hidden');
+                await listenForTasks();
             }
-        });
-        
-        async function authenticateUser() {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                console.error("Authentication Error:", error);
-                loadingSpinner.textContent = 'Falló la autenticación. Por favor, inténtalo de nuevo.';
-            }
-        }
-        
-        // --- Firestore Real-time Listener ---
-        function listenForTasks() {
-            if (unsubscribeTasks) unsubscribeTasks(); // Detach any old listener
-            
-            unsubscribeTasks = onSnapshot(tasksCollectionRef, (snapshot) => {
-                const tasks = [];
-                snapshot.forEach((doc) => {
-                    tasks.push({ id: doc.id, ...doc.data() });
-                });
-                // Sort tasks: incomplete first, then by creation time
-                tasks.sort((a, b) => {
-                    if (a.completed !== b.completed) return a.completed ? 1 : -1;
-                    return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
-                });
-                renderTasks(tasks);
-            });
         }
 
         // --- Render Tasks to the DOM ---
         function renderTasks(tasks) {
-            taskList.innerHTML = ''; // Clear the list before rendering
+            // Sort tasks: incomplete first, then by creation time
+            tasks.sort((a, b) => {
+                if (a.completed !== b.completed) return a.completed ? 1 : -1;
+                return new Date(b.created_at) - new Date(a.created_at);
+            });
+
+            taskList.innerHTML = ''; // Clear the list
             if (tasks.length === 0) {
                 taskList.innerHTML = `<p class="text-center text-lg" style="color: #ab856f;">Aún no hay tareas. ¡Añade una!</p>`;
             } else {
@@ -290,47 +270,65 @@
                 });
             }
         }
+
+        // --- Supabase Real-time Listener ---
+        async function listenForTasks() {
+            // Initial fetch
+            const { data, error } = await _supabase.from('tasks').select('*');
+            if (error) console.error('Error fetching tasks:', error);
+            else renderTasks(data);
+
+            // Listen for changes
+            _supabase.channel('public:tasks')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, async (payload) => {
+                    console.log('Change received!', payload);
+                    // Refetch all tasks to update UI
+                    const { data, error } = await _supabase.from('tasks').select('*');
+                    if (error) console.error('Error fetching tasks after change:', error);
+                    else renderTasks(data);
+                })
+                .subscribe();
+        }
         
         // --- Event Handlers ---
         addTaskForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const taskText = taskInput.value.trim();
-            if (taskText && tasksCollectionRef) {
-                try {
-                    await addDoc(tasksCollectionRef, {
-                        text: taskText,
-                        completed: false,
-                        createdAt: serverTimestamp()
-                    });
+            if (taskText && currentUser) {
+                const { error } = await _supabase.from('tasks').insert({ 
+                    text: taskText, 
+                    user_id: currentUser.id 
+                });
+                if (error) {
+                    console.error("Error adding task: ", error);
+                } else {
                     taskInput.value = ''; // Clear input field
-                } catch (error) {
-                    console.error("Error adding document: ", error);
                 }
             }
         });
 
         taskList.addEventListener('click', async (e) => {
             const taskElement = e.target.closest('[data-id]');
-            if (!taskElement || !tasksCollectionRef) return;
-
+            if (!taskElement) return;
             const taskId = taskElement.dataset.id;
-            const taskDocRef = doc(db, `artifacts/${appId}/users/${userId}/tasks`, taskId);
-
+            
+            // Handle checkbox click
             if (e.target.matches('.custom-checkbox')) {
                 const isCompleted = e.target.checked;
-                try {
-                    await updateDoc(taskDocRef, { completed: isCompleted });
-                } catch (error) {
-                    console.error("Error updating document: ", error);
-                }
+                const { error } = await _supabase
+                    .from('tasks')
+                    .update({ completed: isCompleted })
+                    .eq('id', taskId);
+                if (error) console.error("Error updating task: ", error);
             }
 
+            // Handle delete button click
             if (e.target.matches('.delete-btn, .delete-btn *')) {
-                try {
-                    await deleteDoc(taskDocRef);
-                } catch (error) {
-                    console.error("Error deleting document: ", error);
-                }
+                const { error } = await _supabase
+                    .from('tasks')
+                    .delete()
+                    .eq('id', taskId);
+                if (error) console.error("Error deleting task: ", error);
             }
         });
 
@@ -343,6 +341,10 @@
 
         // --- App Initialization ---
         document.addEventListener('DOMContentLoaded', () => {
+            if (!SUPABASE_CONFIG || !SUPABASE_CONFIG.URL || !SUPABASE_CONFIG.ANON_KEY) {
+                loadingSpinner.textContent = 'Error: Configura tus claves de Supabase en el objeto SUPABASE_CONFIG.';
+                return;
+            }
             authenticateUser();
         });
 
