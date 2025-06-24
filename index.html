@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planificador de Tareas Retro</title>
+    
+    <!-- Tailwind CSS for utility classes -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts: VT323 for the pixel look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <style>
+        /* Custom styles for the Stardew Valley retro aesthetic */
+        body {
+            font-family: 'VT323', monospace;
+            background-color: #6b4a39; /* Woody brown background */
+            background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyCAIAAACRXR/mAAAACXBIWXMAAAsTAAALEwEAmpwYAAAApklEQVRYw+3WMQoAIAgE0Pz/06ssg3SQuYFE31m4YUKyVqt9KCIiUp22tQ/2BLsD8hHi4fM7q939/w8QzxAPMR/R02GMMYbD4bDZbG5ubtbr9b7vRURE5PNn22tJ1Gg0c7jc7/f/APEQ8xDxEPFQezy+rNvtFrPZTMYyRkRk5CHiYeIh4mHiIeIh4qHyLsusVqvZbLlcLpVKpVIppZQyxgGxUURENBr9APpGq9tL7gAAAABJRU5ErkJggg==');
+            color: #fff9e5; /* Creamy white text */
+            image-rendering: pixelated;
+        }
+
+        #app-container {
+            background-color: #4a3023; /* Darker wood color */
+            border: 4px solid #ab856f; /* Lighter wood border */
+            box-shadow: 8px 8px 0px #332117; /* Hard pixel shadow */
+            border-radius: 8px;
+        }
+        
+        #task-input {
+            background-color: #332117;
+            border: 2px solid #ab856f;
+            border-radius: 0;
+            padding: 10px;
+            font-size: 1.25rem;
+            color: #fff9e5;
+        }
+
+        #task-input::placeholder {
+            color: #7d6a5a;
+        }
+
+        #task-input:focus {
+            outline: none;
+            border-color: #d9a169;
+        }
+        
+        .retro-btn {
+            background-color: #7a9e5a; /* Muted green */
+            border: 2px solid #332117;
+            box-shadow: 4px 4px 0px #332117;
+            color: #fff9e5;
+            transition: all 0.1s ease-in-out;
+            border-radius: 0;
+            font-size: 1.25rem;
+            padding: 10px 16px;
+        }
+
+        .retro-btn:active {
+            transform: translate(4px, 4px);
+            box-shadow: none;
+        }
+
+        .task-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: #5c3d2e;
+            border: 2px solid #7d6a5a;
+            padding: 12px;
+            border-radius: 0;
+        }
+
+        .custom-checkbox {
+            -webkit-appearance: none;
+            appearance: none;
+            background-color: #332117;
+            margin-right: 12px;
+            width: 24px;
+            height: 24px;
+            border: 2px solid #ab856f;
+            border-radius: 0;
+            cursor: pointer;
+            display: grid;
+            place-content: center;
+            flex-shrink: 0;
+        }
+
+        .custom-checkbox::before {
+            content: "";
+            width: 14px;
+            height: 14px;
+            transform: scale(0);
+            transition: 120ms transform ease-in-out;
+            background-color: #d9a169; /* Gold color */
+        }
+
+        .custom-checkbox:checked::before {
+            transform: scale(1);
+        }
+
+        .task-text {
+            font-size: 1.5rem; /* Larger pixel text */
+            line-height: 1.1;
+            /* Allow text to wrap */
+            word-break: break-word;
+        }
+
+        .task-text.completed {
+            text-decoration: line-through;
+            color: #7d6a5a;
+        }
+
+        .delete-btn {
+            color: #ab856f;
+            font-size: 1.5rem;
+            padding-left: 1rem;
+        }
+        .delete-btn:hover {
+            color: #d9a169;
+        }
+        
+        /* Mobile responsive styles */
+        @media screen and (max-width: 480px) {
+            #app-container {
+                padding: 1rem;
+                box-shadow: 4px 4px 0px #332117;
+                margin-top: 1rem;
+                margin-bottom: 1rem;
+            }
+
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .task-text {
+                font-size: 1.25rem;
+            }
+            
+            #task-input, .retro-btn {
+                font-size: 1.1rem;
+                padding: 8px 12px;
+            }
+        }
+
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+    
+    <div id="loading-spinner" class="text-2xl" style="color: #fff9e5;">Cargando tus tareas...</div>
+
+    <div id="app-container" class="hidden w-full max-w-lg mx-auto p-6">
+        
+        <!-- Header -->
+        <header class="text-center mb-6">
+            <h1 class="text-5xl mb-2">Mi Planificador</h1>
+            <p style="color: #ab856f;">¡Un día productivo te espera!</p>
+        </header>
+
+        <!-- Add Task Form -->
+        <form id="add-task-form" class="flex items-center gap-3 mb-6">
+            <input type="text" id="task-input" placeholder="Nueva tarea..." class="flex-grow w-full" required>
+            <button type="submit" class="retro-btn">
+                Añadir
+            </button>
+        </form>
+
+        <!-- Task List -->
+        <div id="task-list" class="space-y-3">
+            <!-- Tasks will be injected here by JavaScript -->
+        </div>
+
+        <!-- User ID Display -->
+        <div id="user-info" class="text-center mt-6 text-xs" style="color: #7d6a5a;"></div>
+    </div>
+
+    <!-- Firebase -->
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, collection, addDoc, deleteDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Firebase Configuration ---
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'retro-planner-app';
+
+        // --- Initialize Firebase ---
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        let userId = null;
+        let tasksCollectionRef = null;
+        let unsubscribeTasks = null; // To detach the listener later
+
+        // --- DOM Elements ---
+        const appContainer = document.getElementById('app-container');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const addTaskForm = document.getElementById('add-task-form');
+        const taskInput = document.getElementById('task-input');
+        const taskList = document.getElementById('task-list');
+        const userInfo = document.getElementById('user-info');
+
+        // --- Authentication ---
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                userId = user.uid;
+                console.log("User is signed in with UID:", userId);
+                userInfo.textContent = `ID de Usuario: ${userId}`;
+                
+                // Set up Firestore collection reference now that we have a user ID
+                tasksCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/tasks`);
+                
+                // Start listening for task updates
+                listenForTasks();
+
+                // Show the app and hide the loader
+                appContainer.classList.remove('hidden');
+                loadingSpinner.classList.add('hidden');
+            } else {
+                console.log("No user is signed in.");
+                appContainer.classList.add('hidden');
+                loadingSpinner.textContent = 'No se pudo autenticar. Por favor, refresca la página.';
+                loadingSpinner.classList.remove('hidden');
+            }
+        });
+        
+        async function authenticateUser() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Authentication Error:", error);
+                loadingSpinner.textContent = 'Falló la autenticación. Por favor, inténtalo de nuevo.';
+            }
+        }
+        
+        // --- Firestore Real-time Listener ---
+        function listenForTasks() {
+            if (unsubscribeTasks) unsubscribeTasks(); // Detach any old listener
+            
+            unsubscribeTasks = onSnapshot(tasksCollectionRef, (snapshot) => {
+                const tasks = [];
+                snapshot.forEach((doc) => {
+                    tasks.push({ id: doc.id, ...doc.data() });
+                });
+                // Sort tasks: incomplete first, then by creation time
+                tasks.sort((a, b) => {
+                    if (a.completed !== b.completed) return a.completed ? 1 : -1;
+                    return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
+                });
+                renderTasks(tasks);
+            });
+        }
+
+        // --- Render Tasks to the DOM ---
+        function renderTasks(tasks) {
+            taskList.innerHTML = ''; // Clear the list before rendering
+            if (tasks.length === 0) {
+                taskList.innerHTML = `<p class="text-center text-lg" style="color: #ab856f;">Aún no hay tareas. ¡Añade una!</p>`;
+            } else {
+                tasks.forEach(task => {
+                    const taskElement = document.createElement('div');
+                    taskElement.className = 'task-item';
+                    taskElement.dataset.id = task.id;
+
+                    const isCompleted = task.completed ? 'completed' : '';
+                    const isChecked = task.completed ? 'checked' : '';
+                    
+                    taskElement.innerHTML = `
+                        <div class="flex items-center flex-grow min-w-0">
+                            <input type="checkbox" class="custom-checkbox" ${isChecked}>
+                            <p class="task-text ${isCompleted}">${escapeHTML(task.text)}</p>
+                        </div>
+                        <button class="delete-btn">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    `;
+                    taskList.appendChild(taskElement);
+                });
+            }
+        }
+        
+        // --- Event Handlers ---
+        addTaskForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const taskText = taskInput.value.trim();
+            if (taskText && tasksCollectionRef) {
+                try {
+                    await addDoc(tasksCollectionRef, {
+                        text: taskText,
+                        completed: false,
+                        createdAt: serverTimestamp()
+                    });
+                    taskInput.value = ''; // Clear input field
+                } catch (error) {
+                    console.error("Error adding document: ", error);
+                }
+            }
+        });
+
+        taskList.addEventListener('click', async (e) => {
+            const taskElement = e.target.closest('[data-id]');
+            if (!taskElement || !tasksCollectionRef) return;
+
+            const taskId = taskElement.dataset.id;
+            const taskDocRef = doc(db, `artifacts/${appId}/users/${userId}/tasks`, taskId);
+
+            if (e.target.matches('.custom-checkbox')) {
+                const isCompleted = e.target.checked;
+                try {
+                    await updateDoc(taskDocRef, { completed: isCompleted });
+                } catch (error) {
+                    console.error("Error updating document: ", error);
+                }
+            }
+
+            if (e.target.matches('.delete-btn, .delete-btn *')) {
+                try {
+                    await deleteDoc(taskDocRef);
+                } catch (error) {
+                    console.error("Error deleting document: ", error);
+                }
+            }
+        });
+
+        // --- Utility ---
+        function escapeHTML(str) {
+            const p = document.createElement('p');
+            p.appendChild(document.createTextNode(str));
+            return p.innerHTML;
+        }
+
+        // --- App Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            authenticateUser();
+        });
+
+    </script>
+</body>
+</html>
