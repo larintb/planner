@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Planner</title>
     
-    <script src="env.js"></script>
-    
     <script src="https://cdn.tailwindcss.com"></script>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,7 +13,8 @@
     
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Se eliminó Supabase y se añadió sql.js para la base de datos en el navegador -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
 
     <style>
         /* Custom styles for the Stardew Valley retro aesthetic */
@@ -154,7 +153,7 @@
 </head>
 <body class="flex items-center justify-center min-h-screen p-4">
     
-    <div id="loading-spinner" class="text-2xl" style="color: #fff9e5;">Cargando tus tareas...</div>
+    <div id="loading-spinner" class="text-2xl" style="color: #fff9e5;">Cargando base de datos...</div>
 
     <div id="app-container" class="hidden w-full max-w-lg mx-auto p-6">
         
@@ -177,10 +176,6 @@
     </div>
 
     <script>
-        // --- Supabase Initialization ---
-        const { createClient } = supabase;
-        const _supabase = createClient(SUPABASE_CONFIG.URL, SUPABASE_CONFIG.ANON_KEY);
-
         // --- DOM Elements ---
         const appContainer = document.getElementById('app-container');
         const loadingSpinner = document.getElementById('loading-spinner');
@@ -189,37 +184,57 @@
         const taskList = document.getElementById('task-list');
         const userInfo = document.getElementById('user-info');
         
-        let currentUser = null;
+        // --- Database State ---
+        let db = null;
         let localTasks = []; // Local cache for tasks
 
-        // --- Authentication ---
-        async function authenticateUser() {
-            const { data: { session } } = await _supabase.auth.getSession();
-            
-            if (session) {
-                currentUser = session.user;
-            } else {
-                 const { data, error } = await _supabase.auth.signInAnonymously();
-                 if(error) {
-                     console.error("Error signing in anonymously:", error);
-                     loadingSpinner.textContent = 'Falló la autenticación. Revisa la consola (F12).';
-                     return;
-                 }
-                 currentUser = data.user;
+        // --- Database Functions ---
+
+        // Initialize the database from localStorage or create a new one
+        async function initDB() {
+            try {
+                // Initialize sql.js
+                const SQL = await initSqlJs({
+                    locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
+                });
+
+                // Check for a saved database in localStorage
+                const savedDb = localStorage.getItem('sqlite_db');
+                if (savedDb) {
+                    // The database is stored as a comma-separated string of numbers
+                    const dbArray = savedDb.split(',').map(Number);
+                    db = new SQL.Database(new Uint8Array(dbArray));
+                } else {
+                    db = new SQL.Database();
+                    // Create table if it's a new database
+                    const createTableStmt = `
+                        CREATE TABLE tasks (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            text TEXT NOT NULL,
+                            completed BOOLEAN NOT NULL DEFAULT 0,
+                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                        );
+                    `;
+                    db.run(createTableStmt);
+                    saveDB(); // Save the initial empty state
+                }
+            } catch (err) {
+                console.error("Database initialization failed:", err);
+                loadingSpinner.textContent = 'Error al cargar la base de datos.';
             }
-            
-            if (currentUser) {
-                userInfo.textContent = `ID de Usuario: ${currentUser.id}`;
-                appContainer.classList.remove('hidden');
-                loadingSpinner.classList.add('hidden');
-                await fetchInitialTasks();
-                listenForChanges();
+        }
+
+        // Save the current database state to localStorage
+        function saveDB() {
+            if (db) {
+                const data = db.export();
+                localStorage.setItem('sqlite_db', data.toString());
             }
         }
 
         // --- Render Tasks to the DOM ---
         function renderTasks() {
-            // Sort tasks: incomplete first, then by creation time
+            // Sort tasks: incomplete first, then by creation time (desc)
             localTasks.sort((a, b) => {
                 if (a.completed !== b.completed) return a.completed ? 1 : -1;
                 return new Date(b.created_at) - new Date(a.created_at);
@@ -251,106 +266,84 @@
             }
         }
 
-        // --- Supabase Data Functions ---
-        
-        // Fetch all tasks once on initial load
-        async function fetchInitialTasks() {
-            const { data, error } = await _supabase.from('tasks').select('*');
-            if (error) {
-                console.error('Error fetching tasks:', error);
-            } else {
-                localTasks = data;
+        // --- Data Functions ---
+
+        // Fetch all tasks from the database into the local cache
+        function fetchInitialTasks() {
+            if (!db) return;
+            try {
+                const res = db.exec("SELECT id, text, completed, created_at FROM tasks");
+                if (res.length > 0) {
+                    // Convert query result to an array of objects
+                    localTasks = res[0].values.map(row => ({
+                        id: row[0],
+                        text: row[1],
+                        completed: Boolean(row[2]),
+                        created_at: row[3]
+                    }));
+                } else {
+                    localTasks = [];
+                }
                 renderTasks();
+            } catch (err) {
+                console.error('Error fetching tasks:', err);
             }
         }
-        
-        // Listen for real-time changes
-        function listenForChanges() {
-            _supabase.channel('public:tasks')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
-                    console.log('Change received!', payload);
-                    
-                    switch(payload.eventType) {
-                        case 'INSERT':
-                            // Evita duplicados si la UI se actualiza manualmente también
-                            if (!localTasks.some(t => t.id === payload.new.id)) {
-                                localTasks.push(payload.new);
-                            }
-                            break;
-                        case 'UPDATE':
-                            const indexToUpdate = localTasks.findIndex(t => t.id === payload.new.id);
-                            if (indexToUpdate > -1) {
-                                localTasks[indexToUpdate] = payload.new;
-                            }
-                            break;
-                        case 'DELETE':
-                            localTasks = localTasks.filter(t => t.id !== payload.old.id);
-                            break;
-                    }
-                    renderTasks();
-                })
-                .subscribe();
-        }
-        
+
         // --- Event Handlers ---
-        addTaskForm.addEventListener('submit', async (e) => {
+        addTaskForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const taskText = taskInput.value.trim();
-            if (taskText && currentUser) {
-                // Temporarily disable the form to prevent double submission
-                taskInput.disabled = true;
-                const submitButton = addTaskForm.querySelector('button');
-                submitButton.disabled = true;
+            if (taskText && db) {
+                try {
+                    // Insert the new task
+                    db.run("INSERT INTO tasks (text) VALUES (?)", [taskText]);
+                    saveDB();
 
-                const { data: newTasks, error } = await _supabase
-                    .from('tasks')
-                    .insert({ 
-                        text: taskText, 
-                        user_id: currentUser.id 
-                    })
-                    .select();
-
-                // Re-enable the form
-                taskInput.disabled = false;
-                submitButton.disabled = false;
-                
-                if (error) {
-                    console.error("Error adding task: ", error);
-                } else {
-                    taskInput.value = ''; // Clear input field
+                    // Refetch all tasks to update the UI
+                    fetchInitialTasks(); 
+                    
+                    taskInput.value = '';
                     taskInput.focus();
-                    // Actualizamos la UI aquí para una respuesta más rápida.
-                    // El listener de tiempo real ahora previene duplicados.
-                    if (newTasks && newTasks.length > 0) {
-                        localTasks.push(newTasks[0]);
-                        renderTasks();
-                    }
+                } catch (err) {
+                    console.error("Error adding task: ", err);
                 }
             }
         });
 
-        taskList.addEventListener('click', async (e) => {
+        taskList.addEventListener('click', (e) => {
             const taskElement = e.target.closest('[data-id]');
-            if (!taskElement) return;
-            const taskId = taskElement.dataset.id;
+            if (!taskElement || !db) return;
+            const taskId = parseInt(taskElement.dataset.id, 10);
             
             // Handle checkbox click
             if (e.target.matches('.custom-checkbox')) {
                 const isCompleted = e.target.checked;
-                const { error } = await _supabase
-                    .from('tasks')
-                    .update({ completed: isCompleted })
-                    .eq('id', taskId);
-                if (error) console.error("Error updating task: ", error);
+                try {
+                    db.run("UPDATE tasks SET completed = ? WHERE id = ?", [isCompleted ? 1 : 0, taskId]);
+                    saveDB();
+                    
+                    // Update local cache and re-render for immediate feedback
+                    const task = localTasks.find(t => t.id === taskId);
+                    if (task) task.completed = isCompleted;
+                    renderTasks();
+                } catch (err) {
+                    console.error("Error updating task: ", err);
+                }
             }
 
             // Handle delete button click
             if (e.target.matches('.delete-btn, .delete-btn *')) {
-                const { error } = await _supabase
-                    .from('tasks')
-                    .delete()
-                    .eq('id', taskId);
-                if (error) console.error("Error deleting task: ", error);
+                try {
+                    db.run("DELETE FROM tasks WHERE id = ?", [taskId]);
+                    saveDB();
+
+                    // Update local cache and re-render
+                    localTasks = localTasks.filter(t => t.id !== taskId);
+                    renderTasks();
+                } catch (err) {
+                    console.error("Error deleting task: ", err);
+                }
             }
         });
 
@@ -362,12 +355,14 @@
         }
 
         // --- App Initialization ---
-        document.addEventListener('DOMContentLoaded', () => {
-            if (!SUPABASE_CONFIG || !SUPABASE_CONFIG.URL || !SUPABASE_CONFIG.ANON_KEY) {
-                loadingSpinner.textContent = 'Error: Configura tus claves de Supabase en el objeto SUPABASE_CONFIG.';
-                return;
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initDB();
+            if (db) {
+                appContainer.classList.remove('hidden');
+                loadingSpinner.classList.add('hidden');
+                userInfo.style.display = 'none'; // Hide user info as it's not relevant now
+                fetchInitialTasks();
             }
-            authenticateUser();
         });
 
     </script>
