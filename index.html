@@ -13,7 +13,6 @@
     
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     
-    <!-- Se eliminó Supabase y se añadió sql.js para la base de datos en el navegador -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
 
     <style>
@@ -24,6 +23,7 @@
             background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyCAIAAACRXR/mAAAACXBIWXMAAAsTAAALEwEAmpwYAAAApklEQVRYw+3WMQoAIAgE0Pz/06ssg3SQuYFE31m4YUKyVqt9KCIiUp22tQ/2BLsD8hHi4fM7q939/w8QzxAPMR/R02GMMYbD4bDZbG5ubtbr9b7vRURE5PNn22tJ1Gg0c7jc7/f/APEQ8xDxEPFQezy+rNvtFrPZTMYyRkRk5CHiYeIh4mHiIeIh4qHyLsusVqvZbLlcLpVKpVIppZQyxgGxUURENBr9APpGq9tL7gAAAABJRU5ErkJggg==');
             color: #fff9e5; /* Creamy white text */
             image-rendering: pixelated;
+            overflow: hidden; /* Hide scrollbars from sparkles */
         }
 
         #app-container {
@@ -31,6 +31,8 @@
             border: 4px solid #ab856f; /* Lighter wood border */
             box-shadow: 8px 8px 0px #332117; /* Hard pixel shadow */
             border-radius: 8px;
+            z-index: 10;
+            position: relative;
         }
         
         #task-input {
@@ -75,6 +77,12 @@
             border: 2px solid #7d6a5a;
             padding: 12px;
             border-radius: 0;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .task-item:hover {
+            transform: translate(-2px, -2px);
+            box-shadow: 4px 4px 0px #332117;
         }
 
         .custom-checkbox {
@@ -108,7 +116,6 @@
         .task-text {
             font-size: 1.5rem; /* Larger pixel text */
             line-height: 1.1;
-            /* Allow text to wrap */
             word-break: break-word;
         }
 
@@ -126,6 +133,85 @@
             color: #d9a169;
         }
         
+        /* --- ANIMATIONS & AESTHETICS --- */
+
+        /* Pulsing Title */
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.03); }
+        }
+        h1 {
+            animation: pulse 4s infinite ease-in-out;
+        }
+
+        /* Sparkle Canvas */
+        #sparkle-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* Bee Animation */
+        #bee-container {
+            position: fixed;
+            top: 40px;
+            right: 50px;
+            z-index: 20;
+            animation: hover-float 5s infinite ease-in-out;
+        }
+        .bee {
+            position: relative;
+            width: 24px;
+            height: 24px;
+        }
+        .bee-body {
+            position: absolute;
+            top: 8px;
+            left: 0;
+            width: 24px;
+            height: 14px;
+            background: repeating-linear-gradient(
+                -45deg,
+                #FFD700,
+                #FFD700 6px,
+                #000 6px,
+                #000 10px
+            );
+            border-radius: 10px / 8px;
+            border: 2px solid #000;
+        }
+        .wing {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background-color: rgba(230, 230, 255, 0.8);
+            border: 1px solid #000;
+            border-radius: 50%;
+        }
+        .wing-left {
+            top: 0;
+            left: 4px;
+            animation: flap-wings 0.2s infinite alternate ease-in-out;
+        }
+        .wing-right {
+            top: 0;
+            left: 10px;
+            animation: flap-wings 0.2s infinite alternate-reverse ease-in-out;
+        }
+
+        @keyframes hover-float {
+            0%, 100% { transform: translateY(0) rotate(-5deg); }
+            50% { transform: translateY(-15px) rotate(5deg); }
+        }
+        @keyframes flap-wings {
+            from { transform: rotate(20deg) scaleY(1); }
+            to { transform: rotate(-10deg) scaleY(0.95); }
+        }
+
         /* Mobile responsive styles */
         @media screen and (max-width: 480px) {
             #app-container {
@@ -134,25 +220,26 @@
                 margin-top: 1rem;
                 margin-bottom: 1rem;
             }
-
-            h1 {
-                font-size: 2.5rem;
-            }
-
-            .task-text {
-                font-size: 1.25rem;
-            }
-            
-            #task-input, .retro-btn {
-                font-size: 1.1rem;
-                padding: 8px 12px;
-            }
+            h1 { font-size: 2.5rem; }
+            .task-text { font-size: 1.25rem; }
+            #task-input, .retro-btn { font-size: 1.1rem; padding: 8px 12px; }
+            #bee-container { top: 10px; right: 10px; transform: scale(0.8); }
         }
 
     </style>
 </head>
 <body class="flex items-center justify-center min-h-screen p-4">
     
+    <canvas id="sparkle-canvas"></canvas>
+    
+    <div id="bee-container">
+        <div class="bee">
+            <div class="wing wing-left"></div>
+            <div class="wing wing-right"></div>
+            <div class="bee-body"></div>
+        </div>
+    </div>
+
     <div id="loading-spinner" class="text-2xl" style="color: #fff9e5;">Cargando base de datos...</div>
 
     <div id="app-container" class="hidden w-full max-w-lg mx-auto p-6">
@@ -165,13 +252,11 @@
         <form id="add-task-form" class="flex items-center gap-3 mb-6">
             <input type="text" id="task-input" placeholder="Nueva tarea..." class="flex-grow w-full" required>
             <button type="submit" class="retro-btn">
-                Añadir
+                <i class="fas fa-plus mr-2"></i>Añadir
             </button>
         </form>
 
-        <div id="task-list" class="space-y-3">
-            </div>
-
+        <div id="task-list" class="space-y-3"></div>
         <div id="user-info" class="text-center mt-6 text-xs" style="color: #7d6a5a;"></div>
     </div>
 
@@ -189,24 +274,17 @@
         let localTasks = []; // Local cache for tasks
 
         // --- Database Functions ---
-
-        // Initialize the database from localStorage or create a new one
         async function initDB() {
             try {
-                // Initialize sql.js
                 const SQL = await initSqlJs({
                     locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
                 });
-
-                // Check for a saved database in localStorage
                 const savedDb = localStorage.getItem('sqlite_db');
                 if (savedDb) {
-                    // The database is stored as a comma-separated string of numbers
                     const dbArray = savedDb.split(',').map(Number);
                     db = new SQL.Database(new Uint8Array(dbArray));
                 } else {
                     db = new SQL.Database();
-                    // Create table if it's a new database
                     const createTableStmt = `
                         CREATE TABLE tasks (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,7 +294,7 @@
                         );
                     `;
                     db.run(createTableStmt);
-                    saveDB(); // Save the initial empty state
+                    saveDB();
                 }
             } catch (err) {
                 console.error("Database initialization failed:", err);
@@ -224,7 +302,6 @@
             }
         }
 
-        // Save the current database state to localStorage
         function saveDB() {
             if (db) {
                 const data = db.export();
@@ -234,13 +311,12 @@
 
         // --- Render Tasks to the DOM ---
         function renderTasks() {
-            // Sort tasks: incomplete first, then by creation time (desc)
             localTasks.sort((a, b) => {
                 if (a.completed !== b.completed) return a.completed ? 1 : -1;
                 return new Date(b.created_at) - new Date(a.created_at);
             });
 
-            taskList.innerHTML = ''; // Clear the list
+            taskList.innerHTML = '';
             if (localTasks.length === 0) {
                 taskList.innerHTML = `<p class="text-center text-lg" style="color: #ab856f;">Aún no hay tareas. ¡Añade una!</p>`;
             } else {
@@ -248,7 +324,6 @@
                     const taskElement = document.createElement('div');
                     taskElement.className = 'task-item';
                     taskElement.dataset.id = task.id;
-
                     const isCompleted = task.completed ? 'completed' : '';
                     const isChecked = task.completed ? 'checked' : '';
                     
@@ -267,14 +342,11 @@
         }
 
         // --- Data Functions ---
-
-        // Fetch all tasks from the database into the local cache
         function fetchInitialTasks() {
             if (!db) return;
             try {
                 const res = db.exec("SELECT id, text, completed, created_at FROM tasks");
                 if (res.length > 0) {
-                    // Convert query result to an array of objects
                     localTasks = res[0].values.map(row => ({
                         id: row[0],
                         text: row[1],
@@ -296,13 +368,9 @@
             const taskText = taskInput.value.trim();
             if (taskText && db) {
                 try {
-                    // Insert the new task
                     db.run("INSERT INTO tasks (text) VALUES (?)", [taskText]);
                     saveDB();
-
-                    // Refetch all tasks to update the UI
                     fetchInitialTasks(); 
-                    
                     taskInput.value = '';
                     taskInput.focus();
                 } catch (err) {
@@ -316,14 +384,11 @@
             if (!taskElement || !db) return;
             const taskId = parseInt(taskElement.dataset.id, 10);
             
-            // Handle checkbox click
             if (e.target.matches('.custom-checkbox')) {
                 const isCompleted = e.target.checked;
                 try {
                     db.run("UPDATE tasks SET completed = ? WHERE id = ?", [isCompleted ? 1 : 0, taskId]);
                     saveDB();
-                    
-                    // Update local cache and re-render for immediate feedback
                     const task = localTasks.find(t => t.id === taskId);
                     if (task) task.completed = isCompleted;
                     renderTasks();
@@ -332,13 +397,10 @@
                 }
             }
 
-            // Handle delete button click
             if (e.target.matches('.delete-btn, .delete-btn *')) {
                 try {
                     db.run("DELETE FROM tasks WHERE id = ?", [taskId]);
                     saveDB();
-
-                    // Update local cache and re-render
                     localTasks = localTasks.filter(t => t.id !== taskId);
                     renderTasks();
                 } catch (err) {
@@ -354,17 +416,60 @@
             return p.innerHTML;
         }
 
+        // --- Sparkle Effect Script ---
+        const sparkleCanvas = document.getElementById('sparkle-canvas');
+        const ctx = sparkleCanvas.getContext('2d');
+        let sparkles = [];
+
+        function resizeCanvas() {
+            sparkleCanvas.width = window.innerWidth;
+            sparkleCanvas.height = window.innerHeight;
+        }
+
+        function createSparkles() {
+            for (let i = 0; i < 30; i++) {
+                sparkles.push({
+                    x: Math.random() * sparkleCanvas.width,
+                    y: Math.random() * sparkleCanvas.height,
+                    size: Math.random() * 2 + 1,
+                    speed: Math.random() * 0.5 + 0.2,
+                    opacity: Math.random() * 0.5 + 0.3
+                });
+            }
+        }
+
+        function animateSparkles() {
+            ctx.clearRect(0, 0, sparkleCanvas.width, sparkleCanvas.height);
+            sparkles.forEach(s => {
+                s.y -= s.speed;
+                if (s.y < 0) {
+                    s.y = sparkleCanvas.height;
+                    s.x = Math.random() * sparkleCanvas.width;
+                }
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 249, 229, ${s.opacity})`;
+                ctx.fill();
+            });
+            requestAnimationFrame(animateSparkles);
+        }
+
         // --- App Initialization ---
         document.addEventListener('DOMContentLoaded', async () => {
             await initDB();
             if (db) {
                 appContainer.classList.remove('hidden');
                 loadingSpinner.classList.add('hidden');
-                userInfo.style.display = 'none'; // Hide user info as it's not relevant now
+                userInfo.style.display = 'none';
                 fetchInitialTasks();
+                
+                // Init aesthetics
+                resizeCanvas();
+                createSparkles();
+                animateSparkles();
+                window.addEventListener('resize', resizeCanvas);
             }
         });
-
     </script>
 </body>
 </html>
