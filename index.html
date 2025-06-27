@@ -144,6 +144,26 @@
             animation: pulse 4s infinite ease-in-out;
         }
 
+        /* Custom Validation Message */
+        .validation-message {
+            background-color: #c23a22; /* A retro error red */
+            color: #fff9e5;
+            padding: 10px;
+            border: 2px solid #332117;
+            margin-bottom: 1rem;
+            text-align: center;
+            font-size: 1.1rem;
+            display: none;
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        .validation-message.visible {
+            display: block;
+            opacity: 1;
+            transform: translateY(0);
+        }
+
         /* Sparkle Canvas */
         #sparkle-canvas {
             position: fixed;
@@ -158,10 +178,9 @@
         /* Bee Animation */
         #bee-container {
             position: fixed;
-            top: 40px;
-            right: 50px;
-            z-index: 20;
-            animation: hover-float 5s infinite ease-in-out;
+            z-index: 50; /* Above everything */
+            cursor: pointer;
+            will-change: transform;
         }
         .bee {
             position: relative;
@@ -202,14 +221,84 @@
             left: 10px;
             animation: flap-wings 0.2s infinite alternate-reverse ease-in-out;
         }
-
-        @keyframes hover-float {
-            0%, 100% { transform: translateY(0) rotate(-5deg); }
-            50% { transform: translateY(-15px) rotate(5deg); }
-        }
         @keyframes flap-wings {
             from { transform: rotate(20deg) scaleY(1); }
             to { transform: rotate(-10deg) scaleY(0.95); }
+        }
+
+        /* Bee States */
+        #bee-container.is-dead {
+            transition: transform 1s ease-in;
+            pointer-events: none;
+        }
+        #bee-container.is-dead .wing {
+            animation: none;
+        }
+
+        @keyframes blink-respawn {
+            0% { opacity: 0; } 20% { opacity: 0.7; } 40% { opacity: 0; }
+            60% { opacity: 0.7; } 80% { opacity: 0; } 100% { opacity: 1; }
+        }
+        #bee-container.is-respawning {
+            animation: blink-respawn 2s ease-in-out;
+        }
+        #bee-container.is-respawning .bee-body {
+            background: repeating-linear-gradient(-45deg, #89CFF0, #89CFF0 6px, #4682B4 6px, #4682B4 10px);
+            opacity: 0.7;
+        }
+        #bee-container.is-respawning .wing {
+            background-color: rgba(173, 216, 230, 0.5);
+        }
+
+        /* Lizard Animation */
+        #lizard-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 50px;
+            height: 25px;
+            cursor: pointer;
+            z-index: 4; /* Detrás del contenedor principal, por encima de las partículas */
+            transform: rotate(-45deg);
+        }
+
+        .lizard-body {
+            position: absolute;
+            width: 30px;
+            height: 15px;
+            background-color: #8fbc8f; /* Verde Stardew */
+            border: 1px solid #2f4f4f;
+            border-radius: 50%;
+            top: 5px;
+            left: 10px;
+        }
+
+        .lizard-head {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background-color: #8fbc8f;
+            border: 1px solid #2f4f4f;
+            border-radius: 50%;
+            top: 6.5px;
+            left: 35px;
+        }
+
+        .lizard-tail {
+            position: absolute;
+            width: 20px;
+            height: 6px;
+            background-color: #8fbc8f;
+            border: 1px solid #2f4f4f;
+            border-radius: 0 100% 100% 0 / 0 50% 50% 0;
+            transform: rotate(20deg);
+            top: 9px;
+            left: -5px;
+        }
+        
+        #app-container {
+            position: relative; /* Necesario para que z-index funcione */
+            z-index: 5;
         }
 
         /* Mobile responsive styles */
@@ -223,7 +312,6 @@
             h1 { font-size: 2.5rem; }
             .task-text { font-size: 1.25rem; }
             #task-input, .retro-btn { font-size: 1.1rem; padding: 8px 12px; }
-            #bee-container { top: 10px; right: 10px; transform: scale(0.8); }
         }
 
     </style>
@@ -240,6 +328,14 @@
         </div>
     </div>
 
+    <div id="lizard-container">
+        <div class="lizard">
+            <div class="lizard-tail"></div>
+            <div class="lizard-body"></div>
+            <div class="lizard-head"></div>
+        </div>
+    </div>
+
     <div id="loading-spinner" class="text-2xl" style="color: #fff9e5;">Cargando base de datos...</div>
 
     <div id="app-container" class="hidden w-full max-w-lg mx-auto p-6">
@@ -249,12 +345,14 @@
             <p style="color: #ab856f;">¡Un día productivo te espera!</p>
         </header>
 
-        <form id="add-task-form" class="flex items-center gap-3 mb-6">
+        <form id="add-task-form" class="flex items-center gap-3 mb-6" novalidate>
             <input type="text" id="task-input" placeholder="Nueva tarea..." class="flex-grow w-full" required>
             <button type="submit" class="retro-btn">
                 <i class="fas fa-plus mr-2"></i>Añadir
             </button>
         </form>
+
+        <div id="validation-message" class="validation-message"></div>
 
         <div id="task-list" class="space-y-3"></div>
         <div id="user-info" class="text-center mt-6 text-xs" style="color: #7d6a5a;"></div>
@@ -268,32 +366,23 @@
         const taskInput = document.getElementById('task-input');
         const taskList = document.getElementById('task-list');
         const userInfo = document.getElementById('user-info');
+        const validationMessage = document.getElementById('validation-message');
+        const lizardContainer = document.getElementById('lizard-container');
         
         // --- Database State ---
         let db = null;
-        let localTasks = []; // Local cache for tasks
+        let localTasks = [];
 
         // --- Database Functions ---
         async function initDB() {
             try {
-                const SQL = await initSqlJs({
-                    locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
-                });
+                const SQL = await initSqlJs({ locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}` });
                 const savedDb = localStorage.getItem('sqlite_db');
                 if (savedDb) {
-                    const dbArray = savedDb.split(',').map(Number);
-                    db = new SQL.Database(new Uint8Array(dbArray));
+                    db = new SQL.Database(new Uint8Array(savedDb.split(',').map(Number)));
                 } else {
                     db = new SQL.Database();
-                    const createTableStmt = `
-                        CREATE TABLE tasks (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            text TEXT NOT NULL,
-                            completed BOOLEAN NOT NULL DEFAULT 0,
-                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                        );
-                    `;
-                    db.run(createTableStmt);
+                    db.run(`CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, completed BOOLEAN NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);`);
                     saveDB();
                 }
             } catch (err) {
@@ -303,19 +392,12 @@
         }
 
         function saveDB() {
-            if (db) {
-                const data = db.export();
-                localStorage.setItem('sqlite_db', data.toString());
-            }
+            if (db) localStorage.setItem('sqlite_db', db.export().toString());
         }
 
-        // --- Render Tasks to the DOM ---
+        // --- Render Tasks ---
         function renderTasks() {
-            localTasks.sort((a, b) => {
-                if (a.completed !== b.completed) return a.completed ? 1 : -1;
-                return new Date(b.created_at) - new Date(a.created_at);
-            });
-
+            localTasks.sort((a, b) => (a.completed - b.completed) || (new Date(b.created_at) - new Date(a.created_at)));
             taskList.innerHTML = '';
             if (localTasks.length === 0) {
                 taskList.innerHTML = `<p class="text-center text-lg" style="color: #ab856f;">Aún no hay tareas. ¡Añade una!</p>`;
@@ -324,18 +406,12 @@
                     const taskElement = document.createElement('div');
                     taskElement.className = 'task-item';
                     taskElement.dataset.id = task.id;
-                    const isCompleted = task.completed ? 'completed' : '';
-                    const isChecked = task.completed ? 'checked' : '';
-                    
                     taskElement.innerHTML = `
                         <div class="flex items-center flex-grow min-w-0">
-                            <input type="checkbox" class="custom-checkbox" ${isChecked}>
-                            <p class="task-text ${isCompleted}">${escapeHTML(task.text)}</p>
+                            <input type="checkbox" class="custom-checkbox" ${task.completed ? 'checked' : ''}>
+                            <p class="task-text ${task.completed ? 'completed' : ''}">${escapeHTML(task.text)}</p>
                         </div>
-                        <button class="delete-btn">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    `;
+                        <button class="delete-btn"><i class="fas fa-times"></i></button>`;
                     taskList.appendChild(taskElement);
                 });
             }
@@ -346,40 +422,38 @@
             if (!db) return;
             try {
                 const res = db.exec("SELECT id, text, completed, created_at FROM tasks");
-                if (res.length > 0) {
-                    localTasks = res[0].values.map(row => ({
-                        id: row[0],
-                        text: row[1],
-                        completed: Boolean(row[2]),
-                        created_at: row[3]
-                    }));
-                } else {
-                    localTasks = [];
-                }
+                localTasks = res.length > 0 ? res[0].values.map(row => ({ id: row[0], text: row[1], completed: !!row[2], created_at: row[3] })) : [];
                 renderTasks();
-            } catch (err) {
-                console.error('Error fetching tasks:', err);
-            }
+            } catch (err) { console.error('Error fetching tasks:', err); }
         }
 
         // --- Event Handlers ---
-        addTaskForm.addEventListener('submit', (e) => {
+        addTaskForm.addEventListener('submit', e => {
             e.preventDefault();
             const taskText = taskInput.value.trim();
-            if (taskText && db) {
+
+            if (taskText === '') {
+                validationMessage.textContent = '⚠️ ¡No puedes añadir una tarea vacía!';
+                validationMessage.classList.add('visible');
+                setTimeout(() => {
+                    validationMessage.classList.remove('visible');
+                }, 3000);
+                return;
+            }
+
+            if (db) {
                 try {
                     db.run("INSERT INTO tasks (text) VALUES (?)", [taskText]);
                     saveDB();
                     fetchInitialTasks(); 
                     taskInput.value = '';
                     taskInput.focus();
-                } catch (err) {
-                    console.error("Error adding task: ", err);
-                }
+                    validationMessage.classList.remove('visible');
+                } catch (err) { console.error("Error adding task: ", err); }
             }
         });
 
-        taskList.addEventListener('click', (e) => {
+        taskList.addEventListener('click', e => {
             const taskElement = e.target.closest('[data-id]');
             if (!taskElement || !db) return;
             const taskId = parseInt(taskElement.dataset.id, 10);
@@ -392,9 +466,7 @@
                     const task = localTasks.find(t => t.id === taskId);
                     if (task) task.completed = isCompleted;
                     renderTasks();
-                } catch (err) {
-                    console.error("Error updating task: ", err);
-                }
+                } catch (err) { console.error("Error updating task: ", err); }
             }
 
             if (e.target.matches('.delete-btn, .delete-btn *')) {
@@ -403,9 +475,7 @@
                     saveDB();
                     localTasks = localTasks.filter(t => t.id !== taskId);
                     renderTasks();
-                } catch (err) {
-                    console.error("Error deleting task: ", err);
-                }
+                } catch (err) { console.error("Error deleting task: ", err); }
             }
         });
 
@@ -416,7 +486,195 @@
             return p.innerHTML;
         }
 
-        // --- Sparkle Effect Script ---
+        // --- Bee Animation ---
+        const beeContainer = document.getElementById('bee-container');
+        let beeState = {
+            isDead: false,
+            x: window.innerWidth / 2 - 12, y: window.innerHeight / 2 - 12,
+            lastX: 0, lastY: 0, // For respawning at the same spot
+            // Hopping state
+            isHopping: false,
+            hopProgress: 0,
+            hopDuration: 120, // frames
+            startX: 0, startY: 0,
+            targetX: 0, targetY: 0,
+            scaleX: 1
+        };
+
+        function getFlyableBounds() {
+            const margin = 30; // Same margin as the lizard's path
+            const beeRect = beeContainer.getBoundingClientRect();
+            // Fallback for initial render when rect might be 0
+            const beeWidth = beeRect.width > 0 ? beeRect.width : 24; 
+            const beeHeight = beeRect.height > 0 ? beeRect.height : 24;
+            return {
+                minX: margin,
+                minY: margin,
+                maxX: window.innerWidth - beeWidth - margin,
+                maxY: window.innerHeight - beeHeight - margin,
+            };
+        }
+
+        function updateBeePosition() {
+            if (beeState.isDead) return;
+
+            if (!beeState.isHopping) {
+                // Start a new hop
+                beeState.isHopping = true;
+                beeState.hopProgress = 0;
+                beeState.startX = beeState.x;
+                beeState.startY = beeState.y;
+                
+                const maxDist = 150; // Reducido para movimientos más cortos
+                const bounds = getFlyableBounds();
+
+                let newTargetX = beeState.x + (Math.random() - 0.5) * maxDist;
+                let newTargetY = beeState.y + (Math.random() - 0.5) * maxDist;
+
+                // Boundary check: if the bee is about to go out, reflect its direction
+                if (newTargetX < bounds.minX || newTargetX > bounds.maxX) {
+                    newTargetX = beeState.x - (newTargetX - beeState.x);
+                }
+                if (newTargetY < bounds.minY || newTargetY > bounds.maxY) {
+                    newTargetY = beeState.y - (newTargetY - beeState.y);
+                }
+
+                // Clamp the final target to be strictly within the bounds
+                beeState.targetX = Math.max(bounds.minX, Math.min(newTargetX, bounds.maxX));
+                beeState.targetY = Math.max(bounds.minY, Math.min(newTargetY, bounds.maxY));
+                
+                beeState.scaleX = (beeState.targetX > beeState.startX) ? 1 : -1;
+                beeState.hopDuration = 100 + Math.random() * 100; // Duración más larga para un vuelo más suave
+            }
+
+            beeState.hopProgress++;
+            
+            let t = beeState.hopProgress / beeState.hopDuration;
+            // Ease-in-out timing for a smoother "jump"
+            t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+            beeState.x = beeState.startX + (beeState.targetX - beeState.startX) * t;
+            beeState.y = beeState.startY + (beeState.targetY - beeState.startY) * t;
+
+            const arcHeight = 15; // Un arco más sutil
+            const arc = arcHeight * Math.sin(t * Math.PI);
+            
+            beeContainer.style.transform = `translate(${beeState.x}px, ${beeState.y - arc}px) scaleX(${beeState.scaleX})`;
+
+            if (beeState.hopProgress >= beeState.hopDuration) {
+                beeState.isHopping = false;
+            }
+
+            requestAnimationFrame(updateBeePosition);
+        }
+
+        function killBee() {
+            if (beeState.isDead) return;
+            beeState.isDead = true;
+            
+            beeState.lastX = beeState.x;
+            beeState.lastY = beeState.y;
+
+            beeContainer.classList.add('is-dead');
+            beeContainer.style.transform = `translate(${beeState.x}px, ${window.innerHeight + 50}px) rotate(180deg) scaleX(${beeState.scaleX})`;
+            
+            setTimeout(respawnBee, 3000);
+        }
+
+        function respawnBee() {
+            beeContainer.classList.remove('is-dead');
+            beeContainer.classList.add('is-respawning');
+            
+            beeState.x = beeState.lastX;
+            beeState.y = beeState.lastY;
+            beeState.scaleX = 1;
+            
+            beeContainer.style.transition = 'none';
+            beeContainer.style.transform = `translate(${beeState.x}px, ${beeState.y}px) scaleX(${beeState.scaleX})`;
+            
+            setTimeout(() => {
+                beeContainer.style.transition = '';
+                beeContainer.classList.remove('is-respawning');
+                beeState.isDead = false;
+                beeState.isHopping = false; // Will trigger a new hop
+                requestAnimationFrame(updateBeePosition);
+            }, 2000);
+        }
+        beeContainer.addEventListener('click', killBee);
+
+        // --- Lizard Animation ---
+        let lizardState = {
+            isMoving: false,
+            animationFrameId: null,
+            startTime: 0,
+            tourDuration: 8000, // 8 segundos para el recorrido completo
+        };
+
+        function getLizardPath() {
+            const margin = 30;
+            const lizardWidth = 50;
+            const lizardHeight = 25;
+            return [
+                { x: window.innerWidth - lizardWidth - margin, y: margin }, // 0: Arriba-Derecha
+                { x: margin, y: margin },                                   // 1: Arriba-Izquierda
+                { x: margin, y: window.innerHeight - lizardHeight - margin }, // 2: Abajo-Izquierda
+                { x: window.innerWidth - lizardWidth - margin, y: window.innerHeight - lizardHeight - margin }, // 3: Abajo-Derecha
+                { x: window.innerWidth - lizardWidth - margin, y: margin }  // 4: Vuelta a Arriba-Derecha
+            ];
+        }
+
+        function animateLizard(timestamp) {
+            if (!lizardState.isMoving) return;
+            if (!lizardState.startTime) lizardState.startTime = timestamp;
+            const elapsedTime = timestamp - lizardState.startTime;
+
+            const path = getLizardPath();
+            const legDuration = lizardState.tourDuration / (path.length - 1);
+            
+            const currentLeg = Math.min(Math.floor(elapsedTime / legDuration), path.length - 2);
+            const legStartTime = currentLeg * legDuration;
+            const legElapsedTime = elapsedTime - legStartTime;
+            
+            let t = Math.min(legElapsedTime / legDuration, 1);
+            t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // Suavizado de movimiento
+            
+            const startPos = path[currentLeg];
+            const endPos = path[currentLeg + 1];
+
+            const newX = startPos.x + (endPos.x - startPos.x) * t;
+            const newY = startPos.y + (endPos.y - startPos.y) * t;
+            const angle = Math.atan2(endPos.y - startPos.y, endPos.x - startPos.x) * (180 / Math.PI);
+
+            lizardContainer.style.transform = `translate(${newX}px, ${newY}px) rotate(${angle}deg)`;
+
+            if (elapsedTime >= lizardState.tourDuration) {
+                lizardState.isMoving = false;
+                lizardContainer.style.transform = 'rotate(-45deg)';
+                lizardContainer.style.left = 'auto';
+                lizardContainer.style.top = '20px';
+                lizardContainer.style.right = '20px';
+            } else {
+                lizardState.animationFrameId = requestAnimationFrame(animateLizard);
+            }
+        }
+
+        lizardContainer.addEventListener('click', () => {
+            if (lizardState.isMoving) return;
+
+            lizardState.isMoving = true;
+            lizardState.startTime = 0;
+            
+            lizardContainer.style.left = '0px';
+            lizardContainer.style.top = '0px';
+            lizardContainer.style.right = 'auto';
+            
+            const startPath = getLizardPath()[0];
+            lizardContainer.style.transform = `translate(${startPath.x}px, ${startPath.y}px) rotate(-45deg)`;
+
+            requestAnimationFrame(animateLizard);
+        });
+
+        // --- Sparkle Effect ---
         const sparkleCanvas = document.getElementById('sparkle-canvas');
         const ctx = sparkleCanvas.getContext('2d');
         let sparkles = [];
@@ -426,26 +684,18 @@
             sparkleCanvas.height = window.innerHeight;
         }
 
-        function createSparkles() {
-            for (let i = 0; i < 30; i++) {
+        function animateSparkles() {
+            if (sparkles.length < 30) {
                 sparkles.push({
-                    x: Math.random() * sparkleCanvas.width,
-                    y: Math.random() * sparkleCanvas.height,
-                    size: Math.random() * 2 + 1,
-                    speed: Math.random() * 0.5 + 0.2,
+                    x: Math.random() * sparkleCanvas.width, y: Math.random() * sparkleCanvas.height,
+                    size: Math.random() * 2 + 1, speed: Math.random() * 0.5 + 0.2,
                     opacity: Math.random() * 0.5 + 0.3
                 });
             }
-        }
-
-        function animateSparkles() {
             ctx.clearRect(0, 0, sparkleCanvas.width, sparkleCanvas.height);
-            sparkles.forEach(s => {
+            sparkles.forEach((s, i) => {
                 s.y -= s.speed;
-                if (s.y < 0) {
-                    s.y = sparkleCanvas.height;
-                    s.x = Math.random() * sparkleCanvas.width;
-                }
+                if (s.y < 0) sparkles.splice(i, 1); // Remove sparkles that go off screen
                 ctx.beginPath();
                 ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
                 ctx.fillStyle = `rgba(255, 249, 229, ${s.opacity})`;
@@ -463,10 +713,9 @@
                 userInfo.style.display = 'none';
                 fetchInitialTasks();
                 
-                // Init aesthetics
                 resizeCanvas();
-                createSparkles();
                 animateSparkles();
+                updateBeePosition();
                 window.addEventListener('resize', resizeCanvas);
             }
         });
